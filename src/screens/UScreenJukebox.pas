@@ -2279,7 +2279,10 @@ begin
       Writeln('Response Code: ' + IntToStr(Client.ResponseStatusCode)); // better be 200
       Result := Response.DataString;
     except on E: Exception do
-      Writeln('Something bad happened: ' + E.Message);
+      begin
+        Writeln('Something bad happened: ' + E.Message);
+        Result := '';
+      end;
     end;
   finally
     Client.RequestBody.Free;
@@ -2310,6 +2313,9 @@ begin
   // writeln('will reload queue '+currentSong.Title+currentSong.Artist);
   // currentSong := CatSongs.Song[CurrentSongID];
   resp := PostRequest(Ini.JukeboxQueueServer+'/q-simple', '{"currentSongId":"'+currentSong.Artist+' : '+currentSong.Title+'"}');
+
+  if resp = '' then
+    Exit;
 
   writeln('got resp: ' + resp);
   strArr := SplitString(resp, 0, SepNewLine);
@@ -2674,7 +2680,8 @@ begin
        Finish;
 
     ReloadQueue(JukeboxVisibleSongs[ID]);
-    ID:=0;
+    if CurrentSongList = 0 then // reloadqueue has succeeded. Otherwise just proceed as normal
+      ID:=0;
 
     CurrentSong := CatSongs.Song[JukeboxVisibleSongs[ID]];
     Text[JukeboxTextActualSongArtist].Text := CurrentSong.Artist;
