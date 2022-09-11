@@ -229,6 +229,7 @@ type
 
       JukeboxLine:      integer;
       JukeboxProperty:  integer;
+      JukeboxQueueServer: string;
 
       // Jukebox Lyric Fill Color
       JukeboxSingLineColor:   integer;
@@ -558,6 +559,7 @@ var
   IAutoScoreEasyTranslated:   array of UTF8String;
   IAutoScoreMediumTranslated: array of UTF8String;
   IAutoScoreHardTranslated:   array of UTF8String;
+  ServerUrl:                  string;
 
   // Webcam
   IWebcamFlipTranslated:      array[0..1] of UTF8String = ('Off', 'On');
@@ -1625,6 +1627,8 @@ begin
   JukeboxStyle := ReadArrayIndex(ILyricsStyle, IniFile, 'Jukebox', 'LyricsStyle', 0);
   JukeboxEffect := ReadArrayIndex(ILyricsEffect, IniFile, 'Jukebox', 'LyricsEffect', 1);
   JukeboxAlpha := ReadArrayIndex(ILyricsAlpha, IniFile, 'Jukebox', 'LyricsAlpha', 20);
+
+  JukeboxQueueServer := IniFile.ReadString('Jukebox', 'ServerUrl', '');
 
   JukeboxSongMenu := ReadArrayIndex(IJukeboxSongMenu, IniFile, 'Jukebox', 'SongMenu', IGNORE_INDEX, 'On');
 

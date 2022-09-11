@@ -55,6 +55,8 @@ uses
   dglOpenGL,
   sdl2,
   SysUtils,
+  fphttpclient,
+  opensslsockets,
   TextGL;
 
 type
@@ -200,6 +202,7 @@ type
     ActualInteraction:   integer;
     ListMin:             integer;
     CurrentSongID:       integer;
+    SongPlaylistIDsHistory: array of integer;
 
     //VideoAspect
     VideoAspectText:     integer;
@@ -242,6 +245,9 @@ type
 
     procedure AddSongToJukeboxList(ID: integer);
     function FinishedMusic: boolean;
+    procedure ReloadQueue(CrrntSongID: integer);
+
+    function GetSongPlaylistID(SongID: integer): String;
 
     procedure RefreshCover;
     procedure DrawPlaylist;
@@ -2157,6 +2163,7 @@ procedure TScreenJukebox.Play();
 var
   I: integer;
 begin
+    writeln('play!!!');
     AudioPlayback.Open(CurrentSong.Path.Append(CurrentSong.Mp3));
     AudioPlayback.SetVolume(1.0);
 
@@ -2197,7 +2204,6 @@ begin
   LastTick := SDL_GetTicks();
   LastTickChangeSong := SDL_GetTicks();
   LyricsStart := false;
-
 end;
 
 procedure TScreenJukebox.OnHide;
@@ -2219,8 +2225,140 @@ end;
 
 function TScreenJukebox.FinishedMusic: boolean;
 begin
-    Result := AudioPlayback.Finished;
+  Result := AudioPlayback.Finished;
 
+end;
+
+function GetRequest(url: string): string;
+var
+  Client: TFPHttpClient;
+begin
+  Client := TFPHttpClient.Create(nil);
+  try
+    Result := Client.Get(url);
+    Writeln('Response Code: ' + IntToStr(Client.ResponseStatusCode)); // better be 200
+  finally
+    Client.Free;
+  end;
+end;
+
+function PostRequest(url: string; reqBody: string): string;
+var
+  Client: TFPHttpClient;
+  Response: TStringStream;
+//  Params: string = reqBody;//'{"title": "Some note", "content": "Awesome stuff"}';
+begin
+  Client := TFPHttpClient.Create(nil);
+  Client.RequestBody := TRawByteStringStream.Create(reqBody);
+  // Client.OnDataReceived :=; // todo: can this be an async-like callback...?
+  Response := TStringStream.Create('');
+  try
+    try
+      Client.Post(url, Response);
+      Writeln('Response Code: ' + IntToStr(Client.ResponseStatusCode)); // better be 200
+      Result := Response.DataString;
+    except on E: Exception do
+      begin
+        Writeln('Something bad happened: ' + E.Message);
+        Result := '';
+      end;
+    end;
+  finally
+    Client.RequestBody.Free;
+    Client.Free;
+    Response.Free;
+  end;
+end;
+
+procedure SplitText(aDelimiter: Char; const s: String; aList: TStringList);
+begin
+  aList.Delimiter := aDelimiter;
+  aList.StrictDelimiter := True; // Spaces excluded from being a delimiter
+  aList.DelimitedText := s;
+end;
+
+// Mostly copy-pasted from TPlayListManager.LoadPlayList
+function FindSongByPlaylistSongID(PlaylistSongId: UTF8String): Integer;
+var
+  Title: UTF8String;
+  Artist: UTF8String;
+  I: Integer;
+  PosDelimiter: Integer;
+begin
+  PosDelimiter := UTF8Pos(':', PlaylistSongId);
+  Artist := Trim(copy(PlaylistSongId, 1, PosDelimiter - 1));
+  Title  := Trim(copy(PlaylistSongId, PosDelimiter + 1, Length(PlaylistSongId) - PosDelimiter));
+
+  Result := -1;
+
+  For I := low(CatSongs.Song) to high(CatSongs.Song) do
+  begin
+    if (CatSongs.Song[I].Title = Title) and (CatSongs.Song[I].Artist = Artist) then
+    begin
+      Result := I;
+      Break;
+    end;
+  end;
+end;
+
+function TScreenJukebox.GetSongPlaylistID(SongID: integer): String;
+var
+  currentSong: TSong;
+begin
+  currentSong := CatSongs.Song[SongID];
+  Result := currentSong.Artist + ' : ' + currentSong.Title;
+end;
+
+procedure TScreenJukebox.ReloadQueue(CrrntSongID: Integer);
+var
+  strArr: array of string;
+  arr: array of integer;
+  histArr: array of string;
+  resp: string;
+  I: integer;
+  J: integer;
+const
+  SepNewLine = [#10, #13]; // lf, cr
+begin
+  SetLength(histArr, Length(SongPlaylistIDsHistory));
+  For I := low(SongPlaylistIDsHistory) to high(SongPlaylistIDsHistory) do
+    histArr[I] := GetSongPlaylistID(SongPlaylistIDsHistory[I]);
+
+  // writeln('will reload queue '+currentSong.Title+currentSong.Artist);
+  resp := PostRequest(Ini.JukeboxQueueServer+'/q-simple', '{"currentSongId":"'+GetSongPlaylistID(CrrntSongID)+'", "songIdHistory": ["'+String.Join('","', histArr)+'"]}');
+
+  if resp = '' then
+    Exit;
+
+  writeln('got resp: ' + resp);
+  strArr := SplitString(resp, 0, SepNewLine);
+
+  arr := [];
+
+  For I := low(strArr) to high(strArr) do
+  begin
+    J := FindSongByPlaylistSongID(strArr[I]);
+    if J >= 0 then
+    begin
+      SetLength(arr, Length(arr)+1);
+      arr[High(arr)] := J;
+    end;
+  end;
+
+  // todo: when calling this I seem to be getting sometimes the weirdest skips...
+  // likely that I'm settings these at sub-ideal times...?
+
+  SetLength(JukeboxSongsList, Length(arr));
+  JukeboxSongsList := arr;
+  SetLength(JukeboxVisibleSongs, Length(arr));
+  JukeboxVisibleSongs := arr;
+  
+  ActualInteraction := 0;
+  ListMin := 0;
+  Interaction := 0;
+  
+  CurrentSongList := 0;
+  CatSongs.Selected := JukeboxVisibleSongs[CurrentSongList];
 end;
 
 function TScreenJukebox.Draw: boolean;
@@ -2328,6 +2466,13 @@ begin
     end;
   end;
 
+  // if (LyricsState.GetCurrentTime() * 1000 >= CurrentSong.Finish - 10000) and (not ReloadedQueue) then
+  // begin
+  //   // Application.QueueAsyncCall(@ReloadQueue);
+  //   ReloadQueue;
+  //   ReloadedQueue := true;
+  // end;
+
   if (ScreenAct = 1) and (SongListVisible) then
     DrawPlaylist;
 
@@ -2391,6 +2536,7 @@ end;
 
 procedure TScreenJukebox.Finish;
 begin
+  writeln('finish!!!');
   AudioInput.CaptureStop;
   AudioPlayback.Stop;
   AudioPlayback.SetSyncSource(nil);
@@ -2435,6 +2581,8 @@ end;
  // SentenceIndex: index of the new active sentence
 procedure TScreenJukebox.OnSentenceChange(SentenceIndex: cardinal);
 begin
+  // todo: it seems like this one is called a little bit too often (as in, every frame) when in jukebox mode
+  // writeln('sentence change!!');
   // fill lyrics queue and set upper line to the current sentence
   while (Lyrics.GetUpperLineIndex() < SentenceIndex) or
     (not Lyrics.IsQueueFull) do
@@ -2528,6 +2676,7 @@ var
   Max: integer;
   CoverPath: IPath;
 begin
+  writeln('playmusic!!!');
 
   // background texture (garbage disposal)
   if (Tex_Background.TexNum > 0) then
@@ -2541,6 +2690,11 @@ begin
        ID:=0;
     if high(JukeboxVisibleSongs) < 0 then
        Finish;
+
+    ReloadQueue(JukeboxVisibleSongs[ID]);
+    if CurrentSongList = 0 then // reloadqueue has succeeded. Otherwise just proceed as normal
+      ID:=0;
+
     CurrentSong := CatSongs.Song[JukeboxVisibleSongs[ID]];
     Text[JukeboxTextActualSongArtist].Text := CurrentSong.Artist;
     Text[JukeboxTextActualSongTitle].Text := CurrentSong.Title;
@@ -2715,6 +2869,21 @@ begin
 
   CurrentSongID := JukeboxVisibleSongs[CurrentSongList];
 
+  // Update history: push to end, if length > 5 then remove item at beginning
+  // (only doing this when the current id is not already the last one in the list because we sometimes get double triggers of playing as song)
+  // writeln('range check? ' + InttoStr(low(SongPlaylistIDsHistory))+'   '+InttoStr(High(SongPlaylistIDsHistory)));
+  if (High(SongPlaylistIDsHistory) = -1) or (CurrentSongID <> SongPlaylistIDsHistory[High(SongPlaylistIDsHistory)]) then begin
+    SetLength(SongPlaylistIDsHistory, Length(SongPlaylistIDsHistory)+1);
+    SongPlaylistIDsHistory[High(SongPlaylistIDsHistory)] := CurrentSongID;
+    if Length(SongPlaylistIDsHistory) > 5 then begin
+      Assert(Length(SongPlaylistIDsHistory) = 6);
+      Initialize(SongPlaylistIDsHistory[0]); // todo: is this actually useful for something?
+      Move(SongPlaylistIDsHistory[1], SongPlaylistIDsHistory[0], SizeOf(SongPlaylistIDsHistory[0])*5);
+      Finalize(SongPlaylistIDsHistory[5]);
+      SetLength(SongPlaylistIDsHistory, 5);
+    end;
+  end;
+
   if (not SongListVisibleFix) then
     SongListVisible := ShowList;
 
@@ -2835,7 +3004,7 @@ begin
           TimeString := '';
         end;
 
-        if (Max > -1) then
+        if ((Max > -1) and (I + ListMin < Length(JukeboxVisibleSongs))) then
         begin
           if (JukeboxVisibleSongs[I + ListMin] = CurrentSongID) and (not Button[SongDescription[I]].Selected) then
           begin

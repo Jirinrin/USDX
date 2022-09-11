@@ -54,3 +54,4 @@ ppaslink.sh
 /game/*.db
 /game/*.log
 /game/ultrastardx
+/game/avatars/_*
