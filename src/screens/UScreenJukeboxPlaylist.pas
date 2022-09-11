@@ -284,6 +284,7 @@ begin
   ScreenJukebox.ListMin := 0;
   ScreenJukebox.Interaction := 0;
 
+  // important logic
   if PlayList = 0 then
   begin
     for I := 0 to High(CatSongs.Song) do
@@ -318,16 +319,16 @@ begin
 
   if Playlist = 2 then
   begin
-    if(High(PlaylistMan.PlayLists[Playlist2].Items)>0) then
+    if (High(PlaylistMan.PlayLists[Playlist2].Items)>0) then
     begin
-    for I := 0 to High(PlaylistMan.PlayLists[Playlist2].Items) do
-    begin
-      ScreenJukebox.AddSongToJukeboxList(PlaylistMan.PlayLists[Playlist2].Items[I].SongID);
-    end;
+      for I := 0 to High(PlaylistMan.PlayLists[Playlist2].Items) do
+      begin
+        ScreenJukebox.AddSongToJukeboxList(PlaylistMan.PlayLists[Playlist2].Items[I].SongID);
+      end;
 
-    ScreenJukebox.CurrentSongID := ScreenJukebox.JukeboxVisibleSongs[0];
+      ScreenJukebox.CurrentSongID := ScreenJukebox.JukeboxVisibleSongs[0];
 
-    FadeTo(@ScreenJukebox);
+      FadeTo(@ScreenJukebox);
     end
     else
     begin

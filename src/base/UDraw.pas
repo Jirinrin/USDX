@@ -1184,6 +1184,7 @@ begin
   if (ScreenSing.Settings.LyricsVisible) then
   begin
     if (CurrentSong.isDuet) and (PlayersPlay <> 1) then
+    // duet draw stuff -- shouldn't I be able to impl this for jukebox as well?
     begin
       LyricEngineDuetP1.Draw(LyricsState.MidBeat);
       SingDrawLyricHelper(0, NR.Left, NR.WMid);
