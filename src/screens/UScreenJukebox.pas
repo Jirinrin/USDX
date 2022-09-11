@@ -202,6 +202,7 @@ type
     ActualInteraction:   integer;
     ListMin:             integer;
     CurrentSongID:       integer;
+    SongPlaylistIDsHistory: array of integer;
 
     //VideoAspect
     VideoAspectText:     integer;
@@ -245,6 +246,8 @@ type
     procedure AddSongToJukeboxList(ID: integer);
     function FinishedMusic: boolean;
     procedure ReloadQueue(CrrntSongID: integer);
+
+    function GetSongPlaylistID(SongID: integer): String;
 
     procedure RefreshCover;
     procedure DrawPlaylist;
@@ -2222,32 +2225,8 @@ end;
 
 function TScreenJukebox.FinishedMusic: boolean;
 begin
-    Result := AudioPlayback.Finished;
+  Result := AudioPlayback.Finished;
 
-end;
-
-// Mostly copy-pasted from TPlayListManager.LoadPlayList
-function FindSongByPlaylistSongID(PlaylistSongId: UTF8String): Integer;
-var
-  Title: UTF8String;
-  Artist: UTF8String;
-  I: Integer;
-  PosDelimiter: Integer;
-begin
-  PosDelimiter := UTF8Pos(':', PlaylistSongId);
-  Artist := Trim(copy(PlaylistSongId, 1, PosDelimiter - 1));
-  Title  := Trim(copy(PlaylistSongId, PosDelimiter + 1, Length(PlaylistSongId) - PosDelimiter));
-
-  Result := -1;
-
-  For I := low(CatSongs.Song) to high(CatSongs.Song) do
-  begin
-    if (CatSongs.Song[I].Title = Title) and (CatSongs.Song[I].Artist = Artist) then
-    begin
-      Result := I;
-      Break;
-    end;
-  end;
 end;
 
 function GetRequest(url: string): string;
@@ -2298,21 +2277,55 @@ begin
   aList.DelimitedText := s;
 end;
 
+// Mostly copy-pasted from TPlayListManager.LoadPlayList
+function FindSongByPlaylistSongID(PlaylistSongId: UTF8String): Integer;
+var
+  Title: UTF8String;
+  Artist: UTF8String;
+  I: Integer;
+  PosDelimiter: Integer;
+begin
+  PosDelimiter := UTF8Pos(':', PlaylistSongId);
+  Artist := Trim(copy(PlaylistSongId, 1, PosDelimiter - 1));
+  Title  := Trim(copy(PlaylistSongId, PosDelimiter + 1, Length(PlaylistSongId) - PosDelimiter));
+
+  Result := -1;
+
+  For I := low(CatSongs.Song) to high(CatSongs.Song) do
+  begin
+    if (CatSongs.Song[I].Title = Title) and (CatSongs.Song[I].Artist = Artist) then
+    begin
+      Result := I;
+      Break;
+    end;
+  end;
+end;
+
+function TScreenJukebox.GetSongPlaylistID(SongID: integer): String;
+var
+  currentSong: TSong;
+begin
+  currentSong := CatSongs.Song[SongID];
+  Result := currentSong.Artist + ' : ' + currentSong.Title;
+end;
+
 procedure TScreenJukebox.ReloadQueue(CrrntSongID: Integer);
 var
   strArr: array of string;
   arr: array of integer;
+  histArr: array of string;
   resp: string;
   I: integer;
   J: integer;
-  currentSong: TSong;
 const
   SepNewLine = [#10, #13]; // lf, cr
 begin
-  currentSong := CatSongs.Song[CrrntSongID];
+  SetLength(histArr, Length(SongPlaylistIDsHistory));
+  For I := low(SongPlaylistIDsHistory) to high(SongPlaylistIDsHistory) do
+    histArr[I] := GetSongPlaylistID(SongPlaylistIDsHistory[I]);
+
   // writeln('will reload queue '+currentSong.Title+currentSong.Artist);
-  // currentSong := CatSongs.Song[CurrentSongID];
-  resp := PostRequest(Ini.JukeboxQueueServer+'/q-simple', '{"currentSongId":"'+currentSong.Artist+' : '+currentSong.Title+'"}');
+  resp := PostRequest(Ini.JukeboxQueueServer+'/q-simple', '{"currentSongId":"'+GetSongPlaylistID(CrrntSongID)+'", "songIdHistory": ["'+String.Join('","', histArr)+'"]}');
 
   if resp = '' then
     Exit;
@@ -2322,10 +2335,9 @@ begin
 
   arr := [];
 
-  For I := low(strArr) to high(strArr) do                                                                                                                         
+  For I := low(strArr) to high(strArr) do
   begin
     J := FindSongByPlaylistSongID(strArr[I]);
-    // todo: if current song is not in the list (i.e. I == low(strArr)) it should be the first of it
     if J >= 0 then
     begin
       SetLength(arr, Length(arr)+1);
@@ -2856,6 +2868,21 @@ begin
   Button[JukeboxPlayPause].Visible := true;
 
   CurrentSongID := JukeboxVisibleSongs[CurrentSongList];
+
+  // Update history: push to end, if length > 5 then remove item at beginning
+  // (only doing this when the current id is not already the last one in the list because we sometimes get double triggers of playing as song)
+  // writeln('range check? ' + InttoStr(low(SongPlaylistIDsHistory))+'   '+InttoStr(High(SongPlaylistIDsHistory)));
+  if (High(SongPlaylistIDsHistory) = -1) or (CurrentSongID <> SongPlaylistIDsHistory[High(SongPlaylistIDsHistory)]) then begin
+    SetLength(SongPlaylistIDsHistory, Length(SongPlaylistIDsHistory)+1);
+    SongPlaylistIDsHistory[High(SongPlaylistIDsHistory)] := CurrentSongID;
+    if Length(SongPlaylistIDsHistory) > 5 then begin
+      Assert(Length(SongPlaylistIDsHistory) = 6);
+      Initialize(SongPlaylistIDsHistory[0]); // todo: is this actually useful for something?
+      Move(SongPlaylistIDsHistory[1], SongPlaylistIDsHistory[0], SizeOf(SongPlaylistIDsHistory[0])*5);
+      Finalize(SongPlaylistIDsHistory[5]);
+      SetLength(SongPlaylistIDsHistory, 5);
+    end;
+  end;
 
   if (not SongListVisibleFix) then
     SongListVisible := ShowList;
